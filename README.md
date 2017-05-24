@@ -1,6 +1,7 @@
 # PeopleCounter
 We are developing a low cost people counter based on arduino and ultrasonic range finder sensors. 
-Hardware : 
+
+Hardware: 
   - Arduino Pro Mini 16 Mhz
   - UHC-SR04 ltrasonic range finder
   - DHT11 temperature and humididty sensor
