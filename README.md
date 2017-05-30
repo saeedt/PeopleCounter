@@ -8,7 +8,7 @@ Hardware:
   - Real time clock module 
   - Micro SD card slot
   - I2C LCD display 
-  - Keypad
+  - 4 x 4 Matrix Keypad
   - Lithium Ion battery 
   
 
