@@ -1,0 +1,36 @@
+//Get distance from adjacent wall
+Serial.print("Please set sensor normal to adjacent wall");
+Send Ping();
+double d_adj;
+d_adj = distance(Ping);
+
+If(d_adj < 200 cm)
+{
+  int theta_max = arccos(d_adj/200);
+  Serial.print("Set sensor at any desired angle that is less than: " + theta_max + " degrees.");
+  delay(60,000);
+  double dist_T;
+  dist_T = distance.cm(Ping);
+  int theta_sig = arccos((dist/200)-1);
+  double d_opp_sig = (sin(theta_sig)/cos(theta_sig)*dist_T;
+  Serial.print("Please clear area within " + d_opp_sig + "cm of sensor on adjacent to the side the sensor is pointed away from.");
+  Serial.print("Please enter the expected needed time to clear the area %f", x);
+  delay(x);
+  const double dist_total = distance.cm(Ping);
+  
+  if(dist_total < 200)
+    //So that this error can only occur 3 times before entire configuration must restart
+    int i = 0;
+    while(i<4;i++)
+    {
+      Serial.print.ln("Please check that the angle is set at the correct value with respects to the wall");
+    }
+    
+    Serial.print.ln("Please restart configuration of sensors");
+    //Call beginning function to start configuration again
+    
+   else
+   {
+      Serial.print.ln("Configuration is complete! Please enter the desired delay time to begin measurements: %f", t);
+      delay(t);
+   }
