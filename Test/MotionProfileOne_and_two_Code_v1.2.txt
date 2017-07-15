@@ -1,0 +1,201 @@
+#include <LiquidCrystal.h>
+#include <DS1307.h>
+#include <NewPing.h>
+#include <dht.h>
+
+#define TRIGGER_PIN 11
+#define ECHO_PIN 12
+#define MAX_DIST 300
+dht DHT;
+#define DHT11_PIN 10
+#define MID_POINT (MAX_DIST/2)
+#define ATH 300
+#define TSEXPIRE 1000
+#define ISC 5
+
+float temp = DHT.temperature;
+byte tsCount = 0;
+byte sampCount = 0;
+const int SSIZE = 10;
+
+
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DIST); 
+
+typedef struct{
+  float distance[SSIZE];
+  byte tsSize;
+  byte sZone;
+  unsigned long tim;
+}tss;   //Define object of type TEMPSAMP
+ 
+tss current_tsamp;
+tss previous_tsamp;
+//tss blank_tsamp = {0, 0, 0, 0}; 
+
+typedef struct{
+  float distance[SSIZE];
+  byte ssize;
+  unsigned long tim;
+  char dot;
+}samples;
+
+samples sample;
+samples blank_sample = {0, 0, 0, 0};
+
+
+
+ void setup() {
+    Serial.begin(115200);
+}
+
+void loop() 
+{
+   Sample(); 
+
+    delay(500);
+}
+
+double Sample(){
+
+FillCurrent_Samp();
+previous_tsamp = current_tsamp;
+TestSequentialSamps();
+
+/*Comments below used to test values*/
+// Serial.println("Ts Count: ");
+// Serial.println(tsCount);
+// Serial.println("Distance: ");
+// Serial.println(current_tsamp.distance[tsCount]);
+// Serial.println("Zone: ");
+// Serial.println(current_tsamp.sZone);
+// Serial.println("Time in millis: ");
+// Serial.println(current_tsamp.tim);
+// Serial.println("Size: ");
+//   Serial.println(current_tsamp.tsSize);
+
+
+if(current_tsamp.tsSize >= ISC)
+{
+  StartSampling();
+}
+
+if(sampCount >= SSIZE)
+{
+  StartProcessing();
+}
+
+}
+
+
+void FillCurrent_Samp(){
+  current_tsamp.distance[tsCount] = sonar.ping_cm_tc(temp);
+  current_tsamp.sZone = ZoneDetector();
+  current_tsamp.tim= millis();
+   
+}
+
+byte ZoneDetector(){
+   byte zone;
+  //Check the zone 
+    if(current_tsamp.distance[tsCount] > MID_POINT && current_tsamp.distance[tsCount] < ATH)
+    {
+      zone = 1;
+    }
+    else if(current_tsamp.distance[tsCount] < MID_POINT && current_tsamp.distance[tsCount] > 0)
+    {
+      zone = 2;
+    }
+    else
+    {
+      zone = 0;
+    }
+ return zone;
+}
+
+void TestSequentialSamps(){
+  FillCurrent_Samp();
+  if(current_tsamp.sZone == previous_tsamp.sZone && (current_tsamp.tim - previous_tsamp.tim) < TSEXPIRE)
+  {
+    current_tsamp.tsSize += 1;
+  }
+  else
+  {
+    current_tsamp.tsSize = 0;
+  }
+}
+
+void StartSampling(){
+//Function only used for temporary samples that meet the desired temporary sample count, time constraints, and zone requirements to collect data
+  NewSample();
+  Remove_OLs();
+  Calculate_SampAverage();
+  Add_TS_Time();
+  sample.dot = Sample_DOT();
+  //Take Sample(d);
+  Test_TimeExpiration();
+  Test_ChangeInDistance();
+  Add_Sample_Time();
+//Increment sample count
+  sampCount += 1;
+  
+}
+
+
+void NewSample(){
+//Function used to load measurements into sample structure for computations  
+}
+
+void Remove_OLs(){
+//Function used to remove outliers  
+}
+
+double Calculate_SampAverage(){
+//Function used to calculate the samples average based on its temporary sample results
+  double avg;
+  avg = 0;
+  return avg;
+}
+
+void Add_TS_Time(){
+//Function used to add times in milliseconds to sample structure from the temporary sample structure
+}
+
+char Sample_DOT(){
+//Function used to determine the direction of travel
+
+  char direction_of_travel;
+  if(current_tsamp.sZone = 0)
+  {
+    sample = blank_sample;
+  }
+  else if(current_tsamp.sZone = 1)
+  {
+    direction_of_travel = "Approaching";
+  }
+  else if(current_tsamp.sZone = 2)
+  {
+    direction_of_travel = "Departing";
+  }
+
+  return direction_of_travel;
+}
+
+void Test_TimeExpiration(){
+//Function used to test if the difference between the last measurement recorded and the temporary sample time has expired
+//if difference exceeds expiration: Return & Repeat temporary sampling 
+//if difference does not exceed expiration: Return to StartSampling() Function
+}
+
+void Test_ChangeInDistance(){
+//This Function is used to test the absolute value of the change in distance between the current and last distance of the sample
+//if the difference in distance is between the Lower and Upper Bound of the change in distance of the sample then the distance will be added to the sample along with its time
+  //Otherwise the sample process will repeat  
+}
+
+void Add_Sample_Time(){
+ //Function used to add the sample time to the sample structure that coincides the the most recent distance added to the sample structure
+}
+
+void StartProcessing(){
+  //Function used to process data
+}
