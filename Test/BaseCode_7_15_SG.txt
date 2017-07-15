@@ -1,0 +1,184 @@
+#include <LiquidCrystal.h>
+#include <DS1307.h>
+#include <NewPing.h>
+#include <dht.h>
+// Pin configuration
+#define TRIGGER_PIN 11
+#define ECHO_PIN 12
+#define DHT11_PIN 10
+//sensor configuration
+#define MAX_DIST 300
+dht DHT;
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DIST); 
+// Model parameters
+const byte ATH = 300;
+const byte DTH = 50;
+const byte MID_POINT = (ATH+DTH)%2;
+const int TSEXPIRE = 1000;
+const int PSEXPIRE = 750;
+const byte TSS = 3; //no of samples to take at every sampling
+const byte ISC = 5;
+const byte SSIZE = 30;
+const byte MSS = 20;
+const int sRate = 500;
+
+struct TempSample{
+  float distance[SSIZE];
+  byte size;
+  byte zone; //0: not configured, 1: 
+  unsigned long time;
+};   
+
+struct Sample{
+  float distance[SSIZE];
+  unsigned long time[SSIZE];
+  byte size;
+  byte zone; // 0: not configured, 1: Approaching, 2: Departing, 3: zone cannot be determined
+  byte flag; // 1: sample size less than MSS ,2: zone inconsistent with the temp sample ,4: sample zone cannot be determined ,8: Humidity too high,16: Temp too high ,32: Temp too low, 64: temp changing too quickly, 128: humidity changing too quickly
+};
+
+float sDist;
+unsigned long sTime;
+byte sZone;
+float temp;
+float speed;
+ 
+TempSample tSample;
+Sample pSample;
+
+void setup() {
+    Serial.begin(115200);
+}
+
+void loop() 
+{
+   tempSampling(); 
+   delay(sRate);
+}
+
+void takeSample(){ //takes a given number of non-negative samples and returns the average
+  updateTemp(); 
+  byte ctr = 0;
+  float tDist = 0;
+  do {  
+    tDist = sonar.ping_cm_tc(temp);
+    if (tDist>0) {
+      sDist+=tDist;
+      ctr++;
+    }
+  } while (ctr < TSS);
+  sTime = millis();
+  sDist /=TSS;
+}
+void tempSampling(){ //performs temporary sampling
+  do { 
+    takeSample();
+    if (sDist >= MID_POINT && sDist < ATH) {
+        sZone = 1; //Approaching
+      } else if (sDist < MID_POINT && sDist >= DTH) {
+        sZone = 2; // Departing
+      } else {
+        sZone = 0;
+      }
+    } while (sZone = 0);
+  if ((tSample.size > 0) && (tSample.zone == sZone) && (sTime - tSample.time < TSEXPIRE)) { //consistent, unexpired sample exists           
+    tSample.distance[tSample.size] = sDist;
+    tSample.time = sTime;
+    tSample.size++;
+    if (tSample.size >= ISC) {      
+      startSampling();
+    }
+  } else {
+    tSample.size = 1;
+    tSample.distance[0] = sDist;
+    tSample.time = sTime;
+    tSample.zone = sZone;   
+    }
+  }
+
+void startSampling(){ //performs sampling 
+  remove_OLs();
+  pSample.flag = 0;
+  pSample.size = 1;
+  pSample.time[0] = tSample.time;
+  pSample.zone = tSample.zone;
+  for (byte i=0; i<tSample.size; i++){
+    pSample.distance[0] += tSample.distance[i];
+  }
+  pSample.distance[0]/=tSample.size;
+  tSample.size = 0;
+  do {
+    takeSample();
+    if ((sTime - pSample.time[pSample.size -1])<=PSEXPIRE) {
+      pSample.time[pSample.size] = sTime;
+      pSample.distance[pSample.size] = sDist;
+      pSample.size++;
+    } else {
+      pSample.size = 0;
+      return;
+    }  
+  }
+  while (pSample.size <SSIZE);
+  processSample();
+}
+
+void processSample(){
+  remove_OLs();
+  if (pSample.size < MSS) pSample.flag+= 1;  
+  byte pdi = 0;
+  byte ndi = 0; 
+  float di[pSample.size-1];
+  for (byte i=0; i<pSample.size-1; i++){
+    di[i] = pSample.distance[i+1]-pSample.distance[i];
+    if (di[i] >0) {
+      pdi++;
+    } else {
+      ndi++;
+    }   
+  }
+  if (pdi >=(pSample.size%2)) {
+    if (pSample.zone != 2) {
+      pSample.zone = 2;
+      pSample.flag += 2;
+    }
+  } else if (ndi >= (pSample.size%2)) {
+    if (pSample.zone !=1) {
+      pSample.zone = 1;
+      pSample.flag +=2;
+    }
+  } else {
+    pSample.zone = 3;
+    pSample.flag +=4;
+  }
+  byte ctr = 0;
+  for (byte i=0; i<sizeof(di); i++){
+    if (pSample.zone == 1 && di[i] <0) {//approaching, only negative di's
+      di[i] *= (1000/(pSample.time[i+1]-pSample.time[i])); //gives the speed in cm/s
+      speed += di[i];
+      ctr++;
+    } else if (pSample.zone == 2 && di[i]>0){//departing, only positive di's
+      di[i] *= (1000/(pSample.time[i+1]-pSample.time[i])); //gives the speed in cm/s
+      speed += di[i];
+      ctr++;
+    } else if (di[i] !=0){
+      di[i] *= (1000/(pSample.time[i+1]-pSample.time[i])); //gives the speed in cm/s
+      speed += di[i];
+      ctr++;
+    }
+    speed /=ctr;        
+  }
+  recordSample();
+}
+
+
+void remove_OLs(){
+//Function used to remove outliers  
+}
+
+void updateTemp() {
+//Function used to read temperature and humidity from the sensor in given time intervals and update them 
+}
+
+void recordSample(){
+//Function used to record the sample into the data file stored on the micorSD card
+}
