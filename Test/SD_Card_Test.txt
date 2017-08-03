@@ -1,0 +1,85 @@
+#include <SD.h>
+#include <Wire.h>
+
+int CS_pin = 10;
+int pow_pin = A0;
+long id =1;
+
+float refresh_rate = 0.0;
+
+void setup() 
+{
+
+Serial.begin(115200);
+Serial.println("Initiating Card");
+//CS pin is an output
+pinMode(CS_pin, OUTPUT);
+
+//cARD DRAWS POWER FROM PIN a0, SO SET TO HIGH
+pinMode(pow_pin, OUTPUT);
+digitalWrite(pow_pin, HIGH);
+
+//Check if card ready
+if(!SD.begin(CS_pin))
+{
+  Serial.println("Card Failed");
+  return;
+}
+
+  Serial.println("Card Ready");
+
+  File commandFile = SD.open("COMMANDS.txt");
+  if(commandFile)
+  {
+    Serial.println("Reading Command File");
+
+    float decade = pow(10, (commandFile.available()-1));
+    while(commandFile.available())
+    {
+      float temp = (commandFile.read() - '0');
+      refresh_rate = temp*decade+refresh_rate;
+      decade = decade/10;
+    }
+    Serial.print("Refresh Rate = ");
+    Serial.print(refresh_rate);
+    Serial.println("ms");
+  }
+  else
+  {
+    Serial.println("Could not read command file");
+  }
+
+  File logFile = SD.open("LOG.cav", FILE_WRITE);
+  if(logFile)
+  {
+    logFile.println(" , , , ,");
+    String header = "ID, Temp, Distance, DOT, Time";
+    logFile.println(header);
+    logFile.close();
+    Serial.println(header);
+  }
+  else
+  {
+    Serial.println("Couldn't open log file");
+  }
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+ String dataString = "Line of data that will be displayed";
+
+   //Open a file to write to 
+   //Only one file can be open at a time
+   File dataFile = SD.open("log.txt", FILE_WRITE);
+   if(dataFile)
+   {
+    dataFile.println(dataString);
+    dataFile.close();
+    Serial.println(dataString);
+   }
+   else
+   {
+    Serial.println("Couldn't access file");
+   }
+   delay(refresh_rate);
+}
