@@ -1,0 +1,775 @@
+#include <LiquidCrystal_I2C.h>
+#include <Keypad.h>
+#include <LiquidCrystal.h>
+
+#include <DS1307.h>
+#include <NewPing.h>
+#include <dht.h>
+#include <SPI.h>
+#include <SD.h>
+#include <Wire.h>
+
+int CS_pin = 10;
+int pow_pin = A0;
+long id =1;
+
+float refresh_rate = 0.0;
+
+#define TRIGGER_PIN A3
+#define ECHO_PIN A2
+#define DHT11_PIN A1
+//sensor configuration
+#define MAX_DIST 200
+dht DHT;
+
+
+const byte rows = 4; //four rows
+const byte cols = 4; //four columns
+char keys[rows][cols] = {
+  {'1','2','3','A'},
+  {'4','5','6','B'},
+  {'7','8','9','C'},
+  {'*','0','#','D'}
+};
+byte rowPins[rows] = {3, 4, 5, 6}; //connect to the row pinouts of the keypad
+byte colPins[cols] = {7, 8, 9, 10}; //connect to the column pinouts of the keypad
+
+Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, rows, cols );
+DS1307 rtc(SDA, SCL);
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  // Set the LCD I2C address
+
+
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DIST); 
+// Model parameters
+const byte ATH = 200;
+const byte DTH = 10;
+const byte MID_POINT = MAX_DIST/2;
+int TSEXPIRE = 1000;
+const int PSEXPIRE = 750;
+byte TSS = 10; //no of samples to take at every sampling
+const byte ISC = 5;
+const byte SSIZE = 15;
+const byte MSS = 20; 
+int sRate = 300;
+byte ERRORMARGIN = 156;
+//const byte TIMEOUT = 1000;
+//const int DPDELAY = 1000;
+
+struct TempSample{
+  float distance[SSIZE];
+  byte size;
+  byte zone; //0: not configured, 1: 
+  unsigned long time;
+  float tsTemp;
+};   
+
+struct Sample{
+  float distance[SSIZE];
+  unsigned long time[SSIZE];
+  byte size;
+  byte zone; // 0: not configured, 1: Approaching, 2: Departing, 3: zone cannot be determined
+  byte flag; // 1: sample size less than SSIZE (replacing MSS) ,2: zone inconsistent with the temp sample ,4: sample zone cannot be determined ,8: Humidity too high,16: Temp too high ,32: Temp too low, 64: temp changing too quickly, 128: humidity changing too quickly
+  float deviation[SSIZE];
+};
+
+float sDist;
+unsigned long sTime;
+byte sZone;
+float temp;
+float speed;
+ 
+TempSample tSample;
+Sample pSample;
+
+void setup() {
+    Serial.begin(115200);
+    Serial.println("Initiating Card");
+
+//CS pin as output
+    pinMode(CS_pin, OUTPUT);
+
+//Card draws power from pin A0 thus set to HIGH
+    pinMode(pow_pin, OUTPUT);
+    digitalWrite(pow_pin, HIGH);
+
+//Check if card is ready
+    if(!SD.begin(CS_pin))
+    {
+	Serial.println("Card Failed");
+	return;
+    }
+
+	Serial.println("Card Ready");
+
+    File commandFile = SD.open("COMMANDS.txt");
+    if(commandFile)
+    {
+	Serial.println("Reading Command File");
+	
+	float decade = pow(10, (commandFile.available()-1));
+	while(commandFile.available())
+	{
+	    float temp = (commandFile.read() - '0');
+	    refresh_rate = temp*decade+refresh_rate;
+	    decade = decade/10;
+	}	
+
+	Serial.print("Refresh Rate = ");
+	Serial.print(refresh_rate);
+	Serial.println("ms");
+	}
+	else
+	{
+	    Serial.println("Could not read command file");
+	}
+
+	File logFile = SD.open("log.csv", FILE_WRITE);
+	if(logFile)
+	{
+	    
+	}
+
+    rtc.begin(); 
+    rtc.halt(false);
+    lcd.begin(16,2);
+    lcd.backlight();
+    //inputTime();
+    delay(10000);
+}
+void loop() 
+{ 
+   tempSampling(); 
+   
+
+ Serial.println("Permanent Samp Readings");
+
+
+//Initial Distance and Time
+ Serial.println(pSample.distance[0]);
+ Serial.println(pSample.time[0]);
+
+//Final Distance and Time
+ Serial.println(pSample.distance[pSample.size-1]);
+ Serial.println(pSample.time[pSample.size-1]);
+  
+ Serial.println(pSample.size);
+ Serial.println(pSample.zone);
+ Serial.println(pSample.flag);
+ Serial.println(pSample.deviation[pSample.size]);
+ 
+ delay(sRate);
+
+}
+
+/*void inputTime(){
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Time: "+(String)rtc.getTimeStr());
+  lcd.setCursor(0,1);
+  lcd.print("A: Keep B: Set");
+  byte ctr = 0;
+  do{
+     char key = keypad.getKey();
+      if(key == 'A'){
+        break;
+      }
+      else if(key == 'B'){
+        setTimeFunctn();
+        break;
+      }
+      ctr++;
+      delay(50);
+  }while(ctr <= 100);
+  
+}
+
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DS1307.h>
+#include <Keypad.h>
+
+const byte rows = 4; //four rows
+const byte cols = 4; //four columns
+char keys[rows][cols] = {
+  {'1','2','3','A'},
+  {'4','5','6','B'},
+  {'7','8','9','C'},
+  {'*','0','#','D'}
+};
+byte rowPins[rows] = {9, 8, 7, 6}; //connect to the row pinouts of the keypad
+byte colPins[cols] = {5, 4, 3, 2}; //connect to the column pinouts of the keypad
+
+Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, rows, cols );
+DS1307 rtc(SDA, SCL);
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); // Set the LCD I2C address
+
+const byte TIMEOUT = 1000; //max cycles of wait for user input
+const int DPDELAY = 1000; //display delay
+
+void setup() {
+  rtc.begin();
+  rtc.halt(false);
+  lcd.begin(16,2);   // initialize the lcd for 16 chars 2 lines, turn on backlight
+  lcd.backlight();
+  delay(2000);
+  inputTime();
+}
+
+void loop() {
+  delay (DPDELAY);
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Time: "+(String)rtc.getTimeStr());
+  lcd.setCursor(0,1);
+  lcd.print("Date: "+ (String)rtc.getDateStr());
+}
+
+void inputTime() {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Time: "+(String)rtc.getTimeStr());
+  lcd.setCursor(0,1);
+  lcd.print("A: Keep  B: Set");
+  byte ctr =0;
+  char key;
+  do {
+    key = keypad.getKey();
+    if (key == 'A') {      
+       break; //moves forward without setting the time
+     } else if (key == 'B') {
+       setTime(); //set the time 
+       break;
+     }    
+    ctr++;
+    delay (50);
+    } while (ctr<TIMEOUT); 
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Date: "+ (String)rtc.getDateStr());
+  lcd.setCursor(0,1);
+  lcd.print("A: Keep  B: Set");
+  ctr =0;  
+  do {
+    key = keypad.getKey();
+    if (key == 'A') {   
+      break; //moves forward without setting the time
+    } else if (key == 'B'){
+      setDate();//call set date function: set the date 
+      break;
+    }
+    ctr++;
+    delay (50);
+  } while (ctr<TIMEOUT); 
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Time: "+(String)rtc.getTimeStr());
+  lcd.setCursor(0,1);
+  lcd.print("Date: "+ (String)rtc.getDateStr());
+}
+
+void setTime() {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Enter Hour 00-23");
+  lcd.setCursor(0,1);
+  lcd.print("??");
+  boolean done = false;
+  char key;
+  byte tmp;
+  byte ctr = 0;
+  uint8_t hour = 0;
+  uint8_t min = 0;
+  //set hour
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {  
+      tmp = key - '0';
+      if (tmp <3) {
+        lcd.setCursor(0,1);
+        lcd.print(String(tmp)+'?');
+        hour =10 * tmp;
+        done = true;
+      }
+        }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT));
+  if (!done){
+    lcd.setCursor(0,1);
+    lcd.print("0?");
+  }
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if ((tmp + hour) < 24) {        
+        hour += tmp;
+        if (hour>9) {
+          lcd.setCursor(0,1);
+          lcd.print(String(hour));
+        } else {
+          lcd.setCursor(0,1);
+          lcd.print("0"+String(hour));
+        }
+        done = true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT)); 
+  if (!done) {
+    if (hour > 9 ) {
+      lcd.setCursor(0,1);
+      lcd.print(String(hour));
+    } else {
+      lcd.setCursor(0,1);
+      lcd.print("0"+String(hour));
+    }
+  }
+  delay (DPDELAY);
+  //set minute 
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Enter Min 00-59");
+  lcd.setCursor(0,1);
+  lcd.print("??");
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if (tmp <6) {
+        lcd.setCursor(0,1);
+        lcd.print(String(tmp)+"?");
+        min =tmp * 10;
+        done = true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT)); 
+  if (!done){
+    lcd.setCursor(0,1);
+    lcd.print("0?");
+  }
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if (tmp + min < 59) {
+        min +=tmp;
+        if (min > 9){
+          lcd.setCursor(0,1);
+          lcd.print(String(min));
+        } else {
+          lcd.setCursor(0,1);
+          lcd.print("0"+String(min));
+        }
+        done =true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT));
+  if (!done) {
+    if (min > 9 ) {
+      lcd.setCursor(0,1);
+      lcd.print(min);
+    } else {
+      lcd.setCursor(0,1);
+      lcd.print("0"+String(min));
+    }   
+  }   
+  rtc.setTime(hour,min,0);
+  delay (DPDELAY);
+}
+
+void setDate() {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Enter Year 10-30");
+  lcd.setCursor(0,1);
+  lcd.print("20??");
+  boolean done = false;
+  char key;
+  byte tmp;
+  byte ctr = 0; 
+  uint8_t day = 1;
+  uint8_t maxDays;
+  uint8_t month = 1;
+  uint16_t year = 2017;
+  //set year
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if (tmp <4 && tmp >0) {
+        lcd.setCursor(0,1);
+        lcd.print("20"+String(tmp)+"?");
+        year = 2000+(10 * tmp);
+        done = true;
+      }
+        }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT));
+  if (!done) {
+    lcd.setCursor(0,1);
+    lcd.print("201?");
+    year = 2010;
+  }
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if ((tmp + year) < 2031 && (tmp + year) > 2009) {       
+        year += tmp;
+        lcd.setCursor(0,1);
+        lcd.print(String(year));
+        done = true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT)); 
+  if (!done) {
+    if (year < 2011) year = 2017;   
+    lcd.setCursor(0,1);  
+    lcd.print(String(year));
+  }
+  delay (DPDELAY);
+  //set month 
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Enter Mon. 00-12");
+  lcd.setCursor(0,1);
+  lcd.print("??");
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if (tmp < 2) {
+        lcd.setCursor(0,1);
+        lcd.print(String(tmp)+"?");
+        month =tmp * 10;
+        done = true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT)); 
+  if (!done) lcd.print("0?");
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if (tmp + month < 13) {
+        month +=tmp;
+        if (month >9 ) {
+          lcd.setCursor(0,1);
+          lcd.print(String(month));
+        } else {
+          lcd.setCursor(0,1);
+          lcd.print("0"+String(month));
+        }
+        done =true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT));
+  if (!done) {
+    if (month > 9 ) {
+      lcd.setCursor(0,1);
+      lcd.print(String(month));
+    } else {
+      lcd.setCursor(0,1);
+      lcd.print("0"+String(month));
+    }   
+  }
+  delay (DPDELAY);
+  //set day 
+  lcd.clear();
+  lcd.setCursor(0,0);
+  switch (month){
+    case 1://Jan    
+    case 3://Mar
+    case 5://May
+    case 7://Jul
+    case 8://Aug
+    case 10://Oct
+    case 12://Dec
+      lcd.print("Enter Day 01-31");
+      maxDays = 31;
+      break;
+    case 4://Apr
+    case 6://Jun
+    case 9://Sep
+    case 11://Nov
+      lcd.print("Enter Day 01-30");
+      maxDays = 30;
+      break;
+    case 2://Feb
+    //2012,2016,2020,2024,2028 are leap years
+      if (year==2012 || year==2016 || year==2020 || year==2024 || year==2028){
+        lcd.print("Enter Day 01-29");
+        maxDays = 29;
+      } else {
+        lcd.print("Enter Day 01-28");
+        maxDays = 28;
+      }
+      break;
+  } 
+  lcd.setCursor(0,1);
+  lcd.print("??");
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key - '0';
+      if (tmp <=(maxDays/10)) {
+        lcd.setCursor(0,1);
+        lcd.print(String(tmp)+"?");
+        day =tmp * 10;
+        done = true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT)); 
+  if (!done){
+    lcd.setCursor(0,1);
+    lcd.print("0?");
+  }
+  done = false;
+  ctr = 0;
+  do {
+    key = keypad.getKey();
+    if (isDigit(key)) {   
+      tmp = key  - '0';
+      if (tmp + day <= maxDays) {
+        day +=tmp;
+        if (day >9 ) {
+          lcd.setCursor(0,1);
+          lcd.print(String(day));
+        } else {
+          lcd.setCursor(0,1);
+          lcd.print("0"+String(day));
+        }
+        done =true;
+      }
+    }
+    delay (50);
+    ctr++;
+  } while (!done && (ctr < TIMEOUT));
+  if (!done) {
+    if (day > 9 ) {
+      lcd.setCursor(0,1);
+      lcd.print(String(day));
+    } else {
+      lcd.setCursor(0,1);      
+      lcd.print("0"+String(day));
+    }   
+  } 
+  rtc.setDate(day,month,year);
+  delay (DPDELAY);
+}
+
+boolean isDigit(char c) {
+  return ((c >='0') && (c <= '9'));
+}
+
+
+void tempSampling(){ //performs temporary sampling
+
+  do { 
+    takeSample();
+    if (sDist <= ATH && sDist >= MID_POINT) {
+        sZone = 1; //Approaching
+      } else if (sDist >= DTH && sDist < MID_POINT) {
+        sZone = 2; // Departing
+      } else {
+        sZone = 0;
+      }    
+
+    } while (sZone < 1);
+
+Serial.println("zone detected, tempSamp started");
+  
+  if ((tSample.size > 0) && (tSample.zone == sZone) && (sTime - tSample.time < TSEXPIRE)) { //consistent, unexpired sample exists           
+    tSample.distance[tSample.size-1] = sDist;
+    tSample.time = sTime;
+    tSample.size++;
+      
+    if (tSample.size >= (ISC)) /*TSS/2 is ISC Replacement*/{      
+    
+      startSampling();
+    }
+  } else {
+    tSample.size = 1;
+    tSample.distance[0] = sDist;
+    tSample.time = sTime;
+    tSample.zone = sZone;      
+    }
+  }
+
+
+
+void takeSample(){ //takes a given number of non-negative samples and returns the average
+
+updateTemp();
+  byte ctr = 0;
+  float tDist = 0;  
+  do {  
+    tDist = sonar.ping_cm_tc(temp);    
+    if (tDist>0) {
+      sDist+=tDist;
+      ctr++;
+    }
+  } while (ctr < TSS);
+  sTime = millis();
+  sDist /= TSS;
+  //Yields average distance of the samples to test the data
+}
+
+
+void startSampling(){ //performs sampling 
+
+  remove_OLs();
+  pSample.flag = 0;
+  pSample.size = 1;               //Why is this equal to 1?
+  pSample.time[0] = tSample.time;
+  pSample.zone = tSample.zone;
+  for (byte i=0; i<tSample.size; i++){
+    pSample.distance[0] += tSample.distance[i];
+  }
+  pSample.distance[0]= pSample.distance[0] / tSample.size;
+  tSample.size = 0;
+  do {
+    takeSample();
+    if ((sTime - pSample.time[pSample.size -1])<=(PSEXPIRE)) {
+      pSample.time[pSample.size] = sTime;
+      pSample.distance[pSample.size] = sDist;
+      pSample.size+=1;
+    } else {
+      pSample.size = 0;
+      return;
+    }  
+  }
+  while (pSample.size <SSIZE);
+
+  processSample();
+  
+}
+
+void processSample(){
+
+  remove_OLs();
+  if (pSample.size < MSS){
+    pSample.flag+= 1;  
+  }
+  byte pdi = 0;
+  byte ndi = 0; 
+  float di[pSample.size-1];
+  for (byte i=0; i<pSample.size-1; i++){    //4<5 but 5!<5
+    di[i] = pSample.distance[i+1]-pSample.distance[i];
+    if (di[i] >0) {
+      pdi++;
+    } else {
+      ndi++;
+    }   
+  }
+  if (pdi >=(pSample.size%2)) {
+    if (pSample.zone != 2) {
+      pSample.zone = 2;
+      pSample.flag += 2;
+    }
+  } else if (ndi >= (pSample.size%2)) {
+    if (pSample.zone !=1) {
+      pSample.zone = 1;
+      pSample.flag +=2;
+    }
+  } else {
+    pSample.zone = 3;
+    pSample.flag +=4;
+  }
+  byte ctr = 0;
+  for (byte i=0; i<sizeof(di); i++){
+    if (pSample.zone == 1 && di[i] <0) {//approaching, only negative di's
+      di[i] = di[i]*(1000/(pSample.time[i+1]-pSample.time[i])); //gives the speed in cm/s
+      speed += di[i];
+      ctr++;
+    } else if (pSample.zone == 2 && di[i]>0){//departing, only positive di's
+      di[i] *= (1000/(pSample.time[i+1]-pSample.time[i])); //gives the speed in cm/s
+      speed += di[i];
+      ctr++;
+    } else if (di[i] !=0){
+      di[i] *= (1000/(pSample.time[i+1]-pSample.time[i])); //gives the speed in cm/s
+      speed += di[i];
+      ctr++;
+    }
+    speed = speed / ctr;        
+  }
+
+    
+  recordSample();
+}
+
+
+void remove_OLs(){
+//Serial.println("Removing Outliers");
+//Function used to remove outliers  
+float avg;
+byte i = 0;
+
+for(i=0; i < pSample.size; i++){
+  avg += pSample.distance[i];
+}
+avg /= pSample.size;
+float samples[pSample.size];
+byte kept = 0;
+
+for(i=0; i < pSample.size; i++){
+  if (abs(pSample.distance[i]-avg)<=(avg*(ERRORMARGIN*.01))){
+    samples[kept] = pSample.distance[i];
+    kept++;
+  }
+}
+if (kept < pSample.size) {
+  for(i=0; i<kept; i++){
+    pSample.distance[i]=samples[i];
+  }
+  pSample.size = kept;
+}
+}
+
+void updateTemp() {
+//Function used to read temperature and humidity from the sensor in given time intervals and update them     
+ 
+  //ERROR: temp will not print, is it something to do with the sensor configuration?
+  temp = -1;
+  do{
+  int chk = DHT.read11(DHT11_PIN);
+  temp=DHT.temperature;
+  }
+  while(temp < 1);
+}
+
+void recordSample(){
+//Function used to record the sample into the data file stored on the micorSD card
+
+
+
+}
