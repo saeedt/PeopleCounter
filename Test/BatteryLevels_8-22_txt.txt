@@ -1,0 +1,42 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+uint8_t emptyBattery[8] = {0xe, 0x1b, 0x11, 0x11, 0x11, 0x11, 0x1f};
+uint8_t quarterBattery[8] = {0xe, 0x1b, 0x11, 0x11, 0x11, 0x1f, 0x1f};
+uint8_t halfBattery[8] = {0xe, 0x1b, 0x11, 0x11, 0x1f, 0x1f, 0x1f};
+uint8_t quarterEmptyBattery[8] = {0xe, 0x1b, 0x11, 0x1f, 0x1f, 0x1f, 0x1f};
+uint8_t fullBattery[8] = {0xe, 0x1b, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f};
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
+
+
+void setup() {
+
+  lcd.begin(16,2);
+  lcd.backlight();
+  lcd.createChar(1, emptyBattery);
+  lcd.createChar(2, quarterBattery);
+  lcd.createChar(3, halfBattery);
+  lcd.createChar(4, quarterEmptyBattery);
+  lcd.createChar(5, fullBattery);
+  lcd.home();
+  lcd.setCursor(0,0);
+  lcd.print("Battery: ");
+  checkBattery();
+  lcd.write(1);
+  lcd.write(2);
+  lcd.write(3);
+  lcd.write(4);
+  lcd.write(5);
+  delay(5000);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  checkBattery();
+}
+
+void checkBattery(){
+  //Read battery voltage from analog pin and save as battVolts
+
+  //byte battVolts = 
+}
